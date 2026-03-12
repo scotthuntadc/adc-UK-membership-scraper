@@ -115,11 +115,25 @@ def login(driver):
     """
     log.info("Navigating to DartsAtlas sign-in page...")
     driver.get(f"{BASE_URL}/users/sign_in")
-    time.sleep(2)
+    time.sleep(5)
 
-    wait = WebDriverWait(driver, 15)
+    log.info("Current URL after navigation: %s", driver.current_url)
+    log.info("Page title: %s", driver.title)
+
+    # Log page source snippet for debugging
+    page_source = driver.page_source
+    log.info("Page source length: %d", len(page_source))
+    if "user_email" in page_source:
+        log.info("Found 'user_email' in page source — form is present.")
+    else:
+        log.error("'user_email' NOT found in page source!")
+        log.error("Page source first 1000 chars: %s", page_source[:1000])
+        raise RuntimeError("Login form not found in page source")
+
+    wait = WebDriverWait(driver, 30)
 
     # Find and fill email field (id="user_email")
+    log.info("Waiting for email field...")
     email_field = wait.until(
         EC.presence_of_element_located((By.ID, "user_email"))
     )
@@ -137,16 +151,19 @@ def login(driver):
     form = driver.find_element(By.ID, "new_user")
     form.submit()
     log.info("Login form submitted.")
-    time.sleep(3)
+    time.sleep(5)
+
+    log.info("Post-login URL: %s", driver.current_url)
 
     # Verify login by navigating to the membership export page
     driver.get(f"{BASE_URL}/o/{ORG_ID}/membership_export")
-    time.sleep(2)
+    time.sleep(3)
 
     if "membership_export" in driver.current_url:
         log.info("Login successful!")
     else:
         log.error("Login may have failed. Current URL: %s", driver.current_url)
+        log.error("Page title: %s", driver.title)
         raise RuntimeError(f"Login failed. Ended up at: {driver.current_url}")
 
 
