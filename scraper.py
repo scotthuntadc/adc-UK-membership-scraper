@@ -94,6 +94,19 @@ def build_csv_url(year, month, active_only=False):
 
 def create_driver():
     """Create an undetected Chrome driver that bypasses Cloudflare."""
+    import subprocess
+
+    # Detect installed Chrome version to avoid mismatch
+    try:
+        result = subprocess.run(
+            ["google-chrome", "--version"], capture_output=True, text=True
+        )
+        chrome_version = int(result.stdout.strip().split()[-1].split(".")[0])
+        log.info("Detected Chrome version: %d", chrome_version)
+    except Exception:
+        chrome_version = None
+        log.warning("Could not detect Chrome version, letting uc decide.")
+
     options = uc.ChromeOptions()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
@@ -101,7 +114,7 @@ def create_driver():
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
 
-    driver = uc.Chrome(options=options, version_main=None)
+    driver = uc.Chrome(options=options, version_main=chrome_version)
     driver.implicitly_wait(10)
     return driver
 
