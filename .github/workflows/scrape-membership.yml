@@ -26,6 +26,9 @@ jobs:
         with:
           chrome-version: 'stable'
 
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
@@ -35,4 +38,8 @@ jobs:
           DARTSATLAS_PASSWORD: ${{ secrets.DARTSATLAS_PASSWORD }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
-        run: python scraper.py
+          DISPLAY: ':99'
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 &
+          sleep 2
+          python scraper.py
