@@ -2,8 +2,10 @@ name: ADC Membership Scraper
 
 on:
   schedule:
+    # Run daily at 06:00 UTC (early morning UK)
     - cron: '0 6 * * *'
   workflow_dispatch:
+    # Allow manual trigger from GitHub Actions UI
 
 jobs:
   scrape-membership:
@@ -23,9 +25,6 @@ jobs:
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: 'stable'
-
-      - name: Install ChromeDriver
-        uses: nanasess/setup-chromedriver@v2
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
