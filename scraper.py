@@ -166,13 +166,22 @@ def login(driver):
     password_field.send_keys(DARTSATLAS_PASSWORD)
     log.info("Entered password.")
 
-    # Submit the form (id="new_user")
-    form = driver.find_element(By.ID, "new_user")
-    form.submit()
-    log.info("Login form submitted.")
+    # Submit by clicking the submit button (more reliable than form.submit()
+    # as it ensures CSRF token and all form data are included)
+    submit_btn = driver.find_element(By.CSS_SELECTOR, "#new_user input[type='submit'], #new_user button[type='submit'], #new_user [name='commit']")
+    submit_btn.click()
+    log.info("Login form submitted via button click.")
     time.sleep(5)
 
     log.info("Post-login URL: %s", driver.current_url)
+    log.info("Post-login title: %s", driver.title)
+
+    # Check if we're still on sign_in (login failed)
+    if "sign_in" in driver.current_url:
+        log.error("Still on sign-in page after submit — credentials may be wrong.")
+        # Check for error messages on the page
+        page_text = driver.find_element(By.TAG_NAME, "body").text
+        log.error("Page text: %s", page_text[:500])
 
     # Verify login by navigating to the membership export page
     driver.get(f"{BASE_URL}/o/{ORG_ID}/membership_export")
