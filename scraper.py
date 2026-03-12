@@ -22,11 +22,10 @@ import logging
 from datetime import datetime, date
 from io import StringIO
 
-from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+import undetected_chromedriver as uc
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -94,15 +93,15 @@ def build_csv_url(year, month, active_only=False):
 # ---------------------------------------------------------------------------
 
 def create_driver():
-    """Create a headless Chrome driver."""
-    chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--window-size=1920,1080")
+    """Create an undetected Chrome driver that bypasses Cloudflare."""
+    options = uc.ChromeOptions()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
 
-    driver = webdriver.Chrome(options=chrome_options)
+    driver = uc.Chrome(options=options, version_main=None)
     driver.implicitly_wait(10)
     return driver
 
