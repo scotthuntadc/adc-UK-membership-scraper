@@ -93,7 +93,11 @@ def build_csv_url(year, month, active_only=False):
 # ---------------------------------------------------------------------------
 
 def create_driver():
-    """Create an undetected Chrome driver that bypasses Cloudflare."""
+    """Create an undetected Chrome driver that bypasses Cloudflare.
+    
+    Runs in NON-headless mode with xvfb virtual display to avoid
+    Cloudflare bot detection (headless Chrome is easily fingerprinted).
+    """
     import subprocess
 
     # Detect installed Chrome version to avoid mismatch
@@ -108,7 +112,8 @@ def create_driver():
         log.warning("Could not detect Chrome version, letting uc decide.")
 
     options = uc.ChromeOptions()
-    options.add_argument("--headless=new")
+    # NO --headless flag: Cloudflare detects headless mode.
+    # We use xvfb (virtual framebuffer) in GitHub Actions instead.
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
@@ -122,25 +127,27 @@ def create_driver():
 def login(driver):
     """
     Log in to DartsAtlas via the Devise sign-in form.
-    Form: POST /users/sign_in
-    Fields: user[email] (id=user_email), user[password] (id=user_password)
+    Waits for Cloudflare challenge to resolve before looking for the form.
     """
     log.info("Navigating to DartsAtlas sign-in page...")
     driver.get(f"{BASE_URL}/users/sign_in")
-    time.sleep(5)
 
-    log.info("Current URL after navigation: %s", driver.current_url)
-    log.info("Page title: %s", driver.title)
-
-    # Log page source snippet for debugging
-    page_source = driver.page_source
-    log.info("Page source length: %d", len(page_source))
-    if "user_email" in page_source:
-        log.info("Found 'user_email' in page source — form is present.")
+    # Wait for Cloudflare challenge to resolve (up to 30 seconds)
+    log.info("Waiting for Cloudflare challenge to resolve...")
+    for attempt in range(30):
+        time.sleep(1)
+        title = driver.title
+        if "Just a moment" not in title:
+            log.info("Cloudflare resolved after %d seconds. Title: %s", attempt + 1, title)
+            break
     else:
-        log.error("'user_email' NOT found in page source!")
-        log.error("Page source first 1000 chars: %s", page_source[:1000])
-        raise RuntimeError("Login form not found in page source")
+        log.error("Cloudflare challenge did not resolve after 30 seconds.")
+        log.error("Page title: %s", driver.title)
+        log.error("Page source first 500 chars: %s", driver.page_source[:500])
+        raise RuntimeError("Cloudflare challenge did not resolve")
+
+    time.sleep(2)
+    log.info("Current URL: %s", driver.current_url)
 
     wait = WebDriverWait(driver, 30)
 
