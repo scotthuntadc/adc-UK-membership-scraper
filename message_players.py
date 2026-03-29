@@ -155,55 +155,109 @@ def message_players(driver, tournament_url, player_ids, message):
                 log.warning("Player %s not found in dropdown", player_ref)
                 continue
 
-            time.sleep(1)
+            time.sleep(2)
 
-            # Find the message textarea
+            # Scroll the select into view and wait
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", select_el)
+            time.sleep(0.5)
+
+            # Find the message textarea — wait for it to be visible
             textarea = None
             try:
-                textarea = driver.find_element(By.CSS_SELECTOR,
-                    "textarea[name*='message'], textarea[name*='body'], textarea[name*='content'], textarea")
+                textareas = driver.find_elements(By.TAG_NAME, "textarea")
+                for ta in textareas:
+                    if ta.is_displayed():
+                        textarea = ta
+                        break
+                if not textarea:
+                    textarea = wait.until(EC.visibility_of_element_located((By.TAG_NAME, "textarea")))
             except Exception:
                 log.error("Could not find message textarea")
                 errors.append({"id": player_ref, "error": "No textarea found"})
                 continue
 
-            # Clear and type the message (280 char limit)
+            # Scroll textarea into view and interact
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", textarea)
+            time.sleep(0.5)
+            driver.execute_script("arguments[0].focus();", textarea)
             textarea.clear()
             truncated_msg = message[:280]
-            textarea.send_keys(truncated_msg)
+            # Use JavaScript to set value if send_keys fails
+            try:
+                textarea.send_keys(truncated_msg)
+            except Exception:
+                driver.execute_script("arguments[0].value = arguments[1];", textarea, truncated_msg)
+                # Trigger input event so any JS listeners pick up the change
+                driver.execute_script("arguments[0].dispatchEvent(new Event('input', {bubbles: true}));", textarea)
             time.sleep(0.5)
 
             # Find and click the send/submit button
             submit = None
-            try:
-                submit = driver.find_element(By.CSS_SELECTOR,
-                    "input[type='submit'], button[type='submit'], button:not([type])")
-            except Exception:
-                pass
-
-            if not submit:
+            # Try specific selectors first
+            for selector in [
+                "input[type='submit']",
+                "button[type='submit']",
+                "input[name='commit']",
+                "button[name='commit']",
+            ]:
                 try:
-                    buttons = driver.find_elements(By.TAG_NAME, "button")
-                    for btn in buttons:
-                        txt = btn.text.lower()
-                        if 'send' in txt or 'submit' in txt or 'message' in txt:
+                    el = driver.find_element(By.CSS_SELECTOR, selector)
+                    if el.is_displayed():
+                        submit = el
+                        break
+                except Exception:
+                    continue
+
+            # Try finding button by text
+            if not submit:
+                buttons = driver.find_elements(By.CSS_SELECTOR, "button, input[type='submit']")
+                for btn in buttons:
+                    txt = (btn.text or btn.get_attribute("value") or "").lower()
+                    if any(word in txt for word in ['send', 'submit', 'message', 'post']):
+                        if btn.is_displayed():
                             submit = btn
                             break
-                except Exception:
-                    pass
 
             if submit:
-                submit.click()
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", submit)
+                time.sleep(0.3)
+                try:
+                    submit.click()
+                except Exception:
+                    driver.execute_script("arguments[0].click();", submit)
                 time.sleep(2)
                 sent.append(player_ref)
                 log.info("  SENT to %s", player_ref)
             else:
-                errors.append({"id": player_ref, "error": "No submit button found"})
-                log.error("  No submit button for %s", player_ref)
+                # Last resort: submit the form directly
+                try:
+                    form = textarea.find_element(By.XPATH, "ancestor::form")
+                    form.submit()
+                    time.sleep(2)
+                    sent.append(player_ref)
+                    log.info("  SENT via form submit to %s", player_ref)
+                except Exception:
+                    errors.append({"id": player_ref, "error": "No submit button found"})
+                    log.error("  No submit button for %s", player_ref)
 
         except Exception as e:
-            errors.append({"id": player_ref, "error": str(e)})
-            log.error("  ERROR messaging %s: %s", player_ref, e)
+            errors.append({"id": player_ref, "error": str(e)[:200]})
+            log.error("  ERROR messaging %s: %s", player_ref, str(e)[:200])
+            # Dump page source for debugging
+            try:
+                log.info("  Page title: %s", driver.title)
+                log.info("  Page URL: %s", driver.current_url)
+                source = driver.page_source
+                # Log select elements and textareas found
+                selects = driver.find_elements(By.TAG_NAME, "select")
+                textareas = driver.find_elements(By.TAG_NAME, "textarea")
+                log.info("  Found %d selects, %d textareas", len(selects), len(textareas))
+                for s in selects:
+                    log.info("    select: name=%s, id=%s, displayed=%s", s.get_attribute("name"), s.get_attribute("id"), s.is_displayed())
+                for t in textareas:
+                    log.info("    textarea: name=%s, id=%s, displayed=%s", t.get_attribute("name"), t.get_attribute("id"), t.is_displayed())
+            except Exception:
+                pass
 
     return {
         "sent": sent,
