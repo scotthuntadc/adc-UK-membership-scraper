@@ -27,8 +27,8 @@ log = logging.getLogger(__name__)
 
 DARTSATLAS_EMAIL = os.environ.get("DARTSATLAS_EMAIL")
 DARTSATLAS_PASSWORD = os.environ.get("DARTSATLAS_PASSWORD")
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "").strip()
 BASE_URL = "https://www.dartsatlas.com"
 
 
@@ -149,10 +149,13 @@ def fetch_entries(driver, url):
 
 def supabase_request(method, path, body=None):
     """Make a request to Supabase REST API."""
-    url = f"{SUPABASE_URL}/rest/v1/{path}"
+    # Build URL carefully — GitHub Actions masks secrets in strings,
+    # so we construct it at runtime to avoid the full URL being masked
+    base = SUPABASE_URL.rstrip("/")
+    url = base + "/rest/v1/" + path
     headers = {
         "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Authorization": "Bearer " + SUPABASE_KEY,
         "Content-Type": "application/json",
         "Prefer": "return=minimal",
     }
@@ -160,11 +163,14 @@ def supabase_request(method, path, body=None):
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         resp = urllib.request.urlopen(req)
-        log.info("  Supabase %s %s → %d", method, path[:60], resp.status)
+        log.info("  Supabase %s → %d", method, resp.status)
         return True
     except urllib.error.HTTPError as e:
         body_text = e.read().decode("utf-8", errors="replace")
-        log.error("  Supabase %s %s → %d: %s", method, path[:60], e.code, body_text[:300])
+        log.error("  Supabase %s → %d: %s", method, e.code, body_text[:300])
+        return False
+    except Exception as e:
+        log.error("  Supabase %s → error: %s", method, str(e))
         return False
 
 
@@ -175,25 +181,31 @@ def push_to_supabase(result, request_id):
         return
 
     log.info("Pushing results to Supabase (request_id=%s)...", request_id)
+    log.info("  Supabase URL length: %d, Key length: %d", len(SUPABASE_URL), len(SUPABASE_KEY))
 
-    # Delete any existing result with this request_id
-    encoded_id = urllib.parse.quote(request_id, safe="")
-    supabase_request("DELETE", f"eligibility_lists?list_type=eq.entry_check&name=eq.{encoded_id}")
+    try:
+        # Delete any existing result with this request_id
+        encoded_id = urllib.parse.quote(request_id, safe="")
+        supabase_request("DELETE", "eligibility_lists?list_type=eq.entry_check&name=eq." + encoded_id)
 
-    # Insert the result
-    row = {
-        "name": request_id,
-        "description": result.get("title", "Unknown Event"),
-        "list_type": "entry_check",
-        "region": None,
-        "player_ids": [p["id"] for p in result.get("players", [])],
-        "player_data": result.get("players", []),
-    }
+        # Insert the result
+        row = {
+            "name": request_id,
+            "description": result.get("title", "Unknown Event"),
+            "list_type": "entry_check",
+            "region": None,
+            "player_ids": [p["id"] for p in result.get("players", [])],
+            "player_data": result.get("players", []),
+        }
 
-    if supabase_request("POST", "eligibility_lists", row):
-        log.info("Successfully pushed %d players to Supabase", len(result.get("players", [])))
-    else:
-        log.error("Failed to push to Supabase")
+        if supabase_request("POST", "eligibility_lists", row):
+            log.info("Successfully pushed %d players to Supabase", len(result.get("players", [])))
+        else:
+            log.error("Failed to push to Supabase — check credentials")
+    except Exception as e:
+        log.error("Exception pushing to Supabase: %s", e)
+        # Don't crash — still print the result to stdout
+        log.info("Players were fetched successfully but could not be saved.")
 
 
 def main():

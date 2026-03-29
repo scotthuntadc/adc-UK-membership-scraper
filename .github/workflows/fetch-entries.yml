@@ -41,7 +41,7 @@ jobs:
         env:
           DARTSATLAS_EMAIL: ${{ secrets.DARTSATLAS_EMAIL }}
           DARTSATLAS_PASSWORD: ${{ secrets.DARTSATLAS_PASSWORD }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_URL: "https://tlfunituxidxdzxzqcou.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DISPLAY: ':99'
         run: |
