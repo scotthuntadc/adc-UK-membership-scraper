@@ -51,10 +51,33 @@ jobs:
           echo "--- Result ---"
           cat /tmp/fetch_result.json
 
-      - name: Write Supabase key to file
-        env:
-          SB_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: printenv SB_KEY > /tmp/sb_key.txt
+      - name: Build payload
+        run: |
+          python3 -c "
+          import json,sys
+          data=json.loads(open('/tmp/fetch_result.json').read().strip())
+          p=data.get('players',[])
+          row={'name':sys.argv[1],'description':data.get('title',''),'list_type':'entry_check','region':None,'player_ids':[x['id'] for x in p],'player_data':p}
+          open('/tmp/sb_payload.json','w').write(json.dumps(row))
+          print(f'{len(p)} players, {len(open(\"/tmp/sb_payload.json\").read())} bytes')
+          " "${{ inputs.request_id }}"
 
-      - name: Push results to Supabase
-        run: python push_result.py /tmp/fetch_result.json "${{ inputs.request_id }}" /tmp/sb_key.txt
+      - name: Delete existing entry
+        run: |
+          curl -s -X DELETE \
+            "https://tlfunituxidxdzxzqcou.supabase.co/rest/v1/eligibility_lists?list_type=eq.entry_check&name=eq.${{ inputs.request_id }}" \
+            -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}"
+
+      - name: Insert to Supabase
+        run: |
+          HTTP=$(curl -s -o /tmp/sb_resp.txt -w "%{http_code}" -X POST \
+            "https://tlfunituxidxdzxzqcou.supabase.co/rest/v1/eligibility_lists" \
+            -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d @/tmp/sb_payload.json)
+          echo "HTTP: $HTTP"
+          test "$HTTP" = "201" || { cat /tmp/sb_resp.txt; exit 1; }
+          echo "Pushed to Supabase successfully"
