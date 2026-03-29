@@ -52,7 +52,9 @@ jobs:
           cat /tmp/fetch_result.json
 
       - name: Write Supabase key to file
-        run: echo '${{ secrets.SUPABASE_KEY }}' > /tmp/sb_key.txt
+        env:
+          SB_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: printenv SB_KEY > /tmp/sb_key.txt
 
       - name: Push results to Supabase
         run: python push_result.py /tmp/fetch_result.json "${{ inputs.request_id }}" /tmp/sb_key.txt
