@@ -1,0 +1,89 @@
+name: Deny Ineligible Players
+
+on:
+  workflow_dispatch:
+    inputs:
+      event_url:
+        description: 'DartsAtlas event URL'
+        required: true
+        type: string
+      player_ids:
+        description: 'Comma-separated player IDs to deny'
+        required: true
+        type: string
+      request_id:
+        description: 'Request ID for status tracking'
+        required: true
+        type: string
+      da_email:
+        description: 'DartsAtlas email'
+        required: true
+        type: string
+      da_password:
+        description: 'DartsAtlas password'
+        required: true
+        type: string
+
+jobs:
+  deny-players:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: 'stable'
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Deny players
+        env:
+          DISPLAY: ':99'
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 &
+          sleep 2
+          python deny_players.py "${{ inputs.event_url }}" "${{ inputs.player_ids }}" "${{ inputs.da_email }}" "${{ inputs.da_password }}" 1>/tmp/deny_result.json 2>/tmp/deny_log.txt || true
+          echo "--- Log ---"
+          cat /tmp/deny_log.txt
+          echo "--- Result ---"
+          cat /tmp/deny_result.json
+
+      - name: Save result to Supabase
+        run: |
+          RESULT=$(cat /tmp/deny_result.json | python3 -c "
+          import json, sys
+          text = sys.stdin.read().strip()
+          try:
+              data = json.loads(text)
+              row = {'name': '${{ inputs.request_id }}', 'description': json.dumps(data), 'list_type': 'deny_result', 'region': None, 'player_ids': data.get('denied', []), 'player_data': []}
+              print(json.dumps(row))
+          except:
+              print('{}')
+          ")
+          if [ "$RESULT" = "{}" ]; then exit 0; fi
+
+          curl -s -X DELETE \
+            "https://tlfunituxidxdzxzqcou.supabase.co/rest/v1/eligibility_lists?list_type=eq.deny_result&name=eq.${{ inputs.request_id }}" \
+            -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}"
+
+          curl -s -X POST \
+            "https://tlfunituxidxdzxzqcou.supabase.co/rest/v1/eligibility_lists" \
+            -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d @- <<< "$RESULT"
