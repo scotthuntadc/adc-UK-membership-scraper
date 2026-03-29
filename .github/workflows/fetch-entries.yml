@@ -37,14 +37,16 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Write Supabase key to file
-        run: echo '${{ secrets.SUPABASE_KEY }}' > .supabase_key
+      - name: Encode Supabase key
+        id: encode_key
+        run: echo "SBKEY_B64=$(echo -n '${{ secrets.SUPABASE_KEY }}' | base64 -w 0)" >> $GITHUB_OUTPUT
 
       - name: Fetch entries
         env:
           DARTSATLAS_EMAIL: ${{ secrets.DARTSATLAS_EMAIL }}
           DARTSATLAS_PASSWORD: ${{ secrets.DARTSATLAS_PASSWORD }}
           SUPABASE_URL: "https://tlfunituxidxdzxzqcou.supabase.co"
+          SUPABASE_KEY_B64: ${{ steps.encode_key.outputs.SBKEY_B64 }}
           DISPLAY: ':99'
         run: |
           Xvfb :99 -screen 0 1920x1080x24 &
