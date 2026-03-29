@@ -29,7 +29,7 @@ DARTSATLAS_EMAIL = os.environ.get("DARTSATLAS_EMAIL")
 DARTSATLAS_PASSWORD = os.environ.get("DARTSATLAS_PASSWORD")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()
 # Read key from file if available (avoids GitHub Actions secret masking in headers)
-_key_file = os.path.join(os.path.dirname(__file__), ".supabase_key")
+_key_file = os.path.join(os.getcwd(), ".supabase_key")
 if os.path.exists(_key_file):
     SUPABASE_KEY = open(_key_file).read().strip()
 else:
