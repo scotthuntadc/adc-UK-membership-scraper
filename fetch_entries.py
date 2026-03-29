@@ -13,9 +13,9 @@ import sys
 import json
 import time
 import logging
-import urllib.request
-import urllib.error
-import urllib.parse
+import base64
+
+import requests
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -28,12 +28,16 @@ log = logging.getLogger(__name__)
 DARTSATLAS_EMAIL = os.environ.get("DARTSATLAS_EMAIL")
 DARTSATLAS_PASSWORD = os.environ.get("DARTSATLAS_PASSWORD")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()
-# Read key from file if available (avoids GitHub Actions secret masking in headers)
-_key_file = os.path.join(os.getcwd(), ".supabase_key")
-if os.path.exists(_key_file):
-    SUPABASE_KEY = open(_key_file).read().strip()
+# Read key — try base64-encoded env var first (avoids GitHub Actions secret masking)
+_key_b64 = os.environ.get("SUPABASE_KEY_B64", "")
+if _key_b64:
+    SUPABASE_KEY = base64.b64decode(_key_b64).decode("utf-8").strip()
 else:
-    SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "").strip()
+    _key_file = os.path.join(os.getcwd(), ".supabase_key")
+    if os.path.exists(_key_file):
+        SUPABASE_KEY = open(_key_file).read().strip()
+    else:
+        SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "").strip()
 BASE_URL = "https://www.dartsatlas.com"
 
 
@@ -153,27 +157,27 @@ def fetch_entries(driver, url):
 
 
 def supabase_request(method, path, body=None):
-    """Make a request to Supabase REST API."""
-    # Build URL carefully — GitHub Actions masks secrets in strings,
-    # so we construct it at runtime to avoid the full URL being masked
+    """Make a request to Supabase REST API using requests library."""
     base = SUPABASE_URL.rstrip("/")
     url = base + "/rest/v1/" + path
-    headers = {
+    hdrs = {
         "apikey": SUPABASE_KEY,
         "Authorization": "Bearer " + SUPABASE_KEY,
         "Content-Type": "application/json",
         "Prefer": "return=minimal",
     }
-    data = json.dumps(body).encode("utf-8") if body else None
-    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
-        resp = urllib.request.urlopen(req)
-        log.info("  Supabase %s → %d", method, resp.status)
+        if method == "DELETE":
+            resp = requests.delete(url, headers=hdrs)
+        elif method == "POST":
+            resp = requests.post(url, headers=hdrs, json=body)
+        else:
+            resp = requests.request(method, url, headers=hdrs, json=body)
+        log.info("  Supabase %s → %d", method, resp.status_code)
+        if resp.status_code >= 400:
+            log.error("  Response: %s", resp.text[:300])
+            return False
         return True
-    except urllib.error.HTTPError as e:
-        body_text = e.read().decode("utf-8", errors="replace")
-        log.error("  Supabase %s → %d: %s", method, e.code, body_text[:300])
-        return False
     except Exception as e:
         log.error("  Supabase %s → error: %s", method, str(e))
         return False
@@ -190,7 +194,8 @@ def push_to_supabase(result, request_id):
 
     try:
         # Delete any existing result with this request_id
-        encoded_id = urllib.parse.quote(request_id, safe="")
+        from urllib.parse import quote
+        encoded_id = quote(request_id, safe="")
         supabase_request("DELETE", "eligibility_lists?list_type=eq.entry_check&name=eq." + encoded_id)
 
         # Insert the result
