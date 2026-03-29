@@ -5,11 +5,7 @@ Fetches the entry list from a DartsAtlas tournament/event URL.
 Uses undetected_chromedriver to bypass Cloudflare.
 Pushes results to Supabase for the Admin Hub eligibility checker.
 
-Usage: python fetch_entries.py <dartsatlas_url>
-
-Environment variables:
-  DARTSATLAS_EMAIL, DARTSATLAS_PASSWORD
-  SUPABASE_URL, SUPABASE_KEY
+Usage: python fetch_entries.py <dartsatlas_url> [request_id]
 """
 
 import os
@@ -18,6 +14,8 @@ import json
 import time
 import logging
 import urllib.request
+import urllib.error
+import urllib.parse
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -78,7 +76,8 @@ def login(driver):
     password_field.clear()
     password_field.send_keys(DARTSATLAS_PASSWORD)
 
-    submit_btn = driver.find_element(By.CSS_SELECTOR, "#new_user input[type='submit'], #new_user button[type='submit'], #new_user [name='commit']")
+    submit_btn = driver.find_element(By.CSS_SELECTOR,
+        "#new_user input[type='submit'], #new_user button[type='submit'], #new_user [name='commit']")
     submit_btn.click()
     time.sleep(5)
 
@@ -91,22 +90,18 @@ def login(driver):
 def fetch_entries(driver, url):
     log.info("Fetching entries from: %s", url)
 
-    # Ensure URL ends with /entries
     if not url.rstrip("/").endswith("/entries"):
         url = url.rstrip("/") + "/entries"
 
     driver.get(url)
     time.sleep(3)
 
-    # Wait for entry list to load
     try:
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.CLASS_NAME, "tournament-entry-list"))
         )
     except Exception:
         log.warning("tournament-entry-list not found, trying to parse anyway")
-
-    page_source = driver.page_source
 
     # Extract title
     try:
@@ -115,22 +110,23 @@ def fetch_entries(driver, url):
     except Exception:
         title = "Unknown Event"
 
-    # Extract players: look for user name-and-photo links
+    log.info("Event title: %s", title)
+
+    # Extract players
     players = []
     seen_ids = set()
 
-    # Find all player links
     links = driver.find_elements(By.CSS_SELECTOR, "a.user.name-and-photo")
+    log.info("Found %d player links", len(links))
+
     for link in links:
         try:
             href = link.get_attribute("href") or ""
-            # Extract player ID from /players/{id}
             if "/players/" in href:
                 player_id = href.split("/players/")[-1].split("/")[0].split("?")[0]
             else:
                 continue
 
-            # Get name from the span or img alt
             try:
                 name_span = link.find_element(By.TAG_NAME, "span")
                 name = name_span.text.strip()
@@ -147,8 +143,29 @@ def fetch_entries(driver, url):
         except Exception as e:
             log.warning("Error extracting player: %s", e)
 
-    log.info("Found %d players", len(players))
+    log.info("Extracted %d unique players", len(players))
     return {"title": title, "players": players, "count": len(players), "url": url}
+
+
+def supabase_request(method, path, body=None):
+    """Make a request to Supabase REST API."""
+    url = f"{SUPABASE_URL}/rest/v1/{path}"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    data = json.dumps(body).encode("utf-8") if body else None
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        resp = urllib.request.urlopen(req)
+        log.info("  Supabase %s %s → %d", method, path[:60], resp.status)
+        return True
+    except urllib.error.HTTPError as e:
+        body_text = e.read().decode("utf-8", errors="replace")
+        log.error("  Supabase %s %s → %d: %s", method, path[:60], e.code, body_text[:300])
+        return False
 
 
 def push_to_supabase(result, request_id):
@@ -157,50 +174,26 @@ def push_to_supabase(result, request_id):
         log.warning("No Supabase credentials, skipping push")
         return
 
-    data = json.dumps({
-        "request_id": request_id,
-        "status": "complete",
-        "result": result,
-    }).encode("utf-8")
+    log.info("Pushing results to Supabase (request_id=%s)...", request_id)
 
-    # Upsert to a simple key-value store or use the existing table
-    url = f"{SUPABASE_URL}/rest/v1/rpc/set_eligibility_result"
+    # Delete any existing result with this request_id
+    encoded_id = urllib.parse.quote(request_id, safe="")
+    supabase_request("DELETE", f"eligibility_lists?list_type=eq.entry_check&name=eq.{encoded_id}")
 
-    # Actually, let's just write to a simple approach: update a row
-    # We'll use the eligibility_lists table with a special entry
-    url = f"{SUPABASE_URL}/rest/v1/eligibility_lists"
-
-    # Delete any existing entry check results
-    delete_url = f"{url}?list_type=eq.entry_check&name=eq.{urllib.request.pathname2url(request_id)}"
-    req = urllib.request.Request(delete_url, method="DELETE", headers={
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-    })
-    try:
-        urllib.request.urlopen(req)
-    except Exception:
-        pass
-
-    # Insert result
+    # Insert the result
     row = {
         "name": request_id,
-        "description": result.get("title", ""),
+        "description": result.get("title", "Unknown Event"),
         "list_type": "entry_check",
         "region": None,
         "player_ids": [p["id"] for p in result.get("players", [])],
         "player_data": result.get("players", []),
     }
-    req = urllib.request.Request(url, data=json.dumps(row).encode("utf-8"), method="POST", headers={
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "return=minimal",
-    })
-    try:
-        urllib.request.urlopen(req)
-        log.info("Pushed result to Supabase (request_id=%s)", request_id)
-    except Exception as e:
-        log.error("Failed to push to Supabase: %s", e)
+
+    if supabase_request("POST", "eligibility_lists", row):
+        log.info("Successfully pushed %d players to Supabase", len(result.get("players", [])))
+    else:
+        log.error("Failed to push to Supabase")
 
 
 def main():
@@ -211,6 +204,13 @@ def main():
     event_url = sys.argv[1]
     request_id = sys.argv[2] if len(sys.argv) > 2 else f"manual-{int(time.time())}"
 
+    log.info("=" * 60)
+    log.info("DartsAtlas Entry Fetcher")
+    log.info("  URL: %s", event_url)
+    log.info("  Request ID: %s", request_id)
+    log.info("  Supabase: %s", "configured" if SUPABASE_URL else "NOT configured")
+    log.info("=" * 60)
+
     driver = create_driver()
     try:
         login(driver)
@@ -220,6 +220,10 @@ def main():
     finally:
         driver.quit()
         log.info("Browser closed.")
+
+    log.info("=" * 60)
+    log.info("COMPLETE — %d players found", result.get("count", 0))
+    log.info("=" * 60)
 
 
 if __name__ == "__main__":
