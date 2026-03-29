@@ -1,0 +1,50 @@
+name: Fetch DartsAtlas Entries
+
+on:
+  workflow_dispatch:
+    inputs:
+      event_url:
+        description: 'DartsAtlas event URL'
+        required: true
+        type: string
+      request_id:
+        description: 'Request ID for result lookup'
+        required: true
+        type: string
+
+jobs:
+  fetch-entries:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: 'stable'
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch entries
+        env:
+          DARTSATLAS_EMAIL: ${{ secrets.DARTSATLAS_EMAIL }}
+          DARTSATLAS_PASSWORD: ${{ secrets.DARTSATLAS_PASSWORD }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DISPLAY: ':99'
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 &
+          sleep 2
+          python fetch_entries.py "${{ inputs.event_url }}" "${{ inputs.request_id }}"
