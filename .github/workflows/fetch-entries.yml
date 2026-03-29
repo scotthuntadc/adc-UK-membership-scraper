@@ -51,41 +51,8 @@ jobs:
           echo "--- Result ---"
           cat /tmp/fetch_result.json
 
+      - name: Write Supabase key to file
+        run: echo '${{ secrets.SUPABASE_KEY }}' > /tmp/sb_key.txt
+
       - name: Push results to Supabase
-        run: |
-          python3 -c "
-          import json, sys, subprocess, os
-          data = json.loads(open('/tmp/fetch_result.json').read().strip())
-          players = data.get('players', [])
-          row = {'name': sys.argv[1], 'description': data.get('title',''), 'list_type': 'entry_check', 'region': None, 'player_ids': [p['id'] for p in players], 'player_data': players}
-          open('/tmp/sb_payload.json','w').write(json.dumps(row))
-          print(f'Prepared: {len(players)} players, payload size: {os.path.getsize(\"/tmp/sb_payload.json\")} bytes')
-
-          key = '${{ secrets.SUPABASE_KEY }}'
-          base = 'https://tlfunituxidxdzxzqcou.supabase.co/rest/v1'
-
-          # Write curl config file with headers (avoids secret masking in args)
-          with open('/tmp/curl_headers.txt', 'w') as f:
-              f.write(f'-H \"apikey: {key}\"\n')
-              f.write(f'-H \"Authorization: Bearer {key}\"\n')
-              f.write('-H \"Content-Type: application/json\"\n')
-              f.write('-H \"Prefer: return=minimal\"\n')
-
-          # Delete
-          r = subprocess.run(['curl', '-s', '-K', '/tmp/curl_headers.txt', '-X', 'DELETE',
-              f'{base}/eligibility_lists?list_type=eq.entry_check&name=eq.{sys.argv[1]}'],
-              capture_output=True, text=True)
-          print(f'DELETE done')
-
-          # Insert
-          r = subprocess.run(['curl', '-s', '-K', '/tmp/curl_headers.txt', '-X', 'POST',
-              '-d', '@/tmp/sb_payload.json', '-o', '/tmp/sb_resp.txt', '-w', '%{http_code}',
-              f'{base}/eligibility_lists'],
-              capture_output=True, text=True)
-          code = r.stdout.strip()
-          print(f'POST: {code}')
-          if code != '201':
-              print(open('/tmp/sb_resp.txt').read()[:500] if os.path.exists('/tmp/sb_resp.txt') else 'no response')
-              sys.exit(1)
-          print(f'SUCCESS — {len(players)} players pushed to Supabase')
-          " "${{ inputs.request_id }}"
+        run: python push_result.py /tmp/fetch_result.json "${{ inputs.request_id }}" /tmp/sb_key.txt
