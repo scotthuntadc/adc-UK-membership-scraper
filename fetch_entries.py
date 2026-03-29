@@ -241,8 +241,8 @@ def main():
         driver.quit()
         log.info("Browser closed.")
 
-    # Output JSON to stdout (workflow handles Supabase push via curl)
-    print(json.dumps(result, indent=2))
+    # Output JSON to stdout as single line (workflow handles Supabase push via curl)
+    print(json.dumps(result))
     log.info("COMPLETE — %d players found", result.get("count", 0))
 
 

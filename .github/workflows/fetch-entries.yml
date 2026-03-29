@@ -53,29 +53,38 @@ jobs:
 
       - name: Push results to Supabase
         run: |
-          # Extract the JSON result (last JSON object in output)
-          RESULT=$(python3 -c "
-          import json, sys
-          text = open('/tmp/fetch_result.json').read()
-          # Find the JSON object in the output
-          start = text.rfind('{')
-          if start >= 0:
-              end = text.rfind('}') + 1
-              data = json.loads(text[start:end])
-              players = data.get('players', [])
-              title = data.get('title', 'Unknown')
-              row = {
-                  'name': '${{ inputs.request_id }}',
-                  'description': title,
-                  'list_type': 'entry_check',
-                  'region': None,
-                  'player_ids': [p['id'] for p in players],
-                  'player_data': players,
-              }
-              print(json.dumps(row))
-          else:
-              print('{}')
-          ")
+          # Parse the JSON result file
+          RESULT=$(python3 << 'PYEOF'
+          import json
+          text = open('/tmp/fetch_result.json').read().strip()
+          try:
+              data = json.loads(text)
+          except json.JSONDecodeError:
+              lines = text.strip().split('\n')
+              for line in reversed(lines):
+                  line = line.strip()
+                  if line.startswith('{'):
+                      try:
+                          data = json.loads(line)
+                          break
+                      except:
+                          continue
+              else:
+                  print('{}')
+                  exit()
+          players = data.get('players', [])
+          title = data.get('title', 'Unknown')
+          row = {
+              'name': '${{ inputs.request_id }}',
+              'description': title,
+              'list_type': 'entry_check',
+              'region': None,
+              'player_ids': [p['id'] for p in players],
+              'player_data': players,
+          }
+          print(json.dumps(row))
+          PYEOF
+          )
 
           if [ "$RESULT" = "{}" ]; then
             echo "No result to push"
