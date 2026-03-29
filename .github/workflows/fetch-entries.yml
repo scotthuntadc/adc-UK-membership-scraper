@@ -37,18 +37,66 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Encode Supabase key
-        id: encode_key
-        run: echo "SBKEY_B64=$(echo -n '${{ secrets.SUPABASE_KEY }}' | base64 -w 0)" >> $GITHUB_OUTPUT
-
-      - name: Fetch entries
+      - name: Fetch entries from DartsAtlas
         env:
           DARTSATLAS_EMAIL: ${{ secrets.DARTSATLAS_EMAIL }}
           DARTSATLAS_PASSWORD: ${{ secrets.DARTSATLAS_PASSWORD }}
-          SUPABASE_URL: "https://tlfunituxidxdzxzqcou.supabase.co"
-          SUPABASE_KEY_B64: ${{ steps.encode_key.outputs.SBKEY_B64 }}
           DISPLAY: ':99'
         run: |
           Xvfb :99 -screen 0 1920x1080x24 &
           sleep 2
-          python fetch_entries.py "${{ inputs.event_url }}" "${{ inputs.request_id }}"
+          python fetch_entries.py "${{ inputs.event_url }}" "${{ inputs.request_id }}" > /tmp/fetch_result.json 2>&1 || true
+          cat /tmp/fetch_result.json
+
+      - name: Push results to Supabase
+        run: |
+          # Extract the JSON result (last JSON object in output)
+          RESULT=$(python3 -c "
+          import json, sys
+          text = open('/tmp/fetch_result.json').read()
+          # Find the JSON object in the output
+          start = text.rfind('{')
+          if start >= 0:
+              end = text.rfind('}') + 1
+              data = json.loads(text[start:end])
+              players = data.get('players', [])
+              title = data.get('title', 'Unknown')
+              row = {
+                  'name': '${{ inputs.request_id }}',
+                  'description': title,
+                  'list_type': 'entry_check',
+                  'region': None,
+                  'player_ids': [p['id'] for p in players],
+                  'player_data': players,
+              }
+              print(json.dumps(row))
+          else:
+              print('{}')
+          ")
+
+          if [ "$RESULT" = "{}" ]; then
+            echo "No result to push"
+            exit 0
+          fi
+
+          # Delete existing
+          curl -s -X DELETE \
+            "https://tlfunituxidxdzxzqcou.supabase.co/rest/v1/eligibility_lists?list_type=eq.entry_check&name=eq.${{ inputs.request_id }}" \
+            -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}"
+
+          # Insert
+          HTTP_CODE=$(curl -s -o /tmp/sb_response.txt -w "%{http_code}" -X POST \
+            "https://tlfunituxidxdzxzqcou.supabase.co/rest/v1/eligibility_lists" \
+            -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d "$RESULT")
+
+          echo "Supabase response: $HTTP_CODE"
+          if [ "$HTTP_CODE" != "201" ]; then
+            cat /tmp/sb_response.txt
+            exit 1
+          fi
+          echo "Successfully pushed to Supabase"

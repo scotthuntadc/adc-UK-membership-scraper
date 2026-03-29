@@ -237,15 +237,13 @@ def main():
     try:
         login(driver)
         result = fetch_entries(driver, event_url)
-        print(json.dumps(result, indent=2))
-        push_to_supabase(result, request_id)
     finally:
         driver.quit()
         log.info("Browser closed.")
 
-    log.info("=" * 60)
+    # Output JSON to stdout (workflow handles Supabase push via curl)
+    print(json.dumps(result, indent=2))
     log.info("COMPLETE — %d players found", result.get("count", 0))
-    log.info("=" * 60)
 
 
 if __name__ == "__main__":
