@@ -45,7 +45,10 @@ jobs:
         run: |
           Xvfb :99 -screen 0 1920x1080x24 &
           sleep 2
-          python fetch_entries.py "${{ inputs.event_url }}" "${{ inputs.request_id }}" > /tmp/fetch_result.json 2>&1 || true
+          python fetch_entries.py "${{ inputs.event_url }}" "${{ inputs.request_id }}" 1>/tmp/fetch_result.json 2>/tmp/fetch_log.txt || true
+          echo "--- Log ---"
+          cat /tmp/fetch_log.txt
+          echo "--- Result ---"
           cat /tmp/fetch_result.json
 
       - name: Push results to Supabase
