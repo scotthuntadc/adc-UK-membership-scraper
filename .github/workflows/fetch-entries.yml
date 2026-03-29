@@ -55,35 +55,31 @@ jobs:
         env:
           SB_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
-          # Build the Supabase row from the fetch result
-          ROW=$(python3 -c "
+          python3 -c "
           import json, sys
           data = json.loads(open('/tmp/fetch_result.json').read().strip())
           players = data.get('players', [])
           row = {'name': sys.argv[1], 'description': data.get('title',''), 'list_type': 'entry_check', 'region': None, 'player_ids': [p['id'] for p in players], 'player_data': players}
-          print(json.dumps(row))
-          " "${{ inputs.request_id }}")
+          open('/tmp/sb_payload.json','w').write(json.dumps(row))
+          print(f'Prepared: {len(players)} players')
+          " "${{ inputs.request_id }}"
 
-          echo "Row length: ${#ROW}"
-
-          # Delete existing using curl (curl handles masked secrets fine)
           curl -s -X DELETE \
             "https://tlfunituxidxdzxzqcou.supabase.co/rest/v1/eligibility_lists?list_type=eq.entry_check&name=eq.${{ inputs.request_id }}" \
             -H "apikey: ${SB_KEY}" \
             -H "Authorization: Bearer ${SB_KEY}"
 
-          # Insert using curl
           HTTP_CODE=$(curl -s -o /tmp/sb_resp.txt -w "%{http_code}" -X POST \
             "https://tlfunituxidxdzxzqcou.supabase.co/rest/v1/eligibility_lists" \
             -H "apikey: ${SB_KEY}" \
             -H "Authorization: Bearer ${SB_KEY}" \
             -H "Content-Type: application/json" \
             -H "Prefer: return=minimal" \
-            -d "${ROW}")
+            -d @/tmp/sb_payload.json)
 
           echo "Supabase POST: ${HTTP_CODE}"
           if [ "${HTTP_CODE}" != "201" ]; then
             cat /tmp/sb_resp.txt
             exit 1
           fi
-          echo "SUCCESS — pushed to Supabase"
+          echo "SUCCESS"
