@@ -101,15 +101,17 @@ def deny_players(driver, event_url, player_ids):
     not_found = []
     errors = []
 
-    for player_id in player_ids:
+    for player_ref in player_ids:
         try:
-            # Look for the player's deny button
-            # DartsAtlas check-in pages have player rows with check-in/deny buttons
-            # Try multiple selector patterns
+            is_name_match = player_ref.startswith("name:")
+            player_name = player_ref[5:] if is_name_match else None
+            player_id = player_ref if not is_name_match else None
+
             deny_btn = None
 
             # Pattern 1: Link with player ID in the row
-            try:
+            if player_id:
+              try:
                 player_row = driver.find_element(By.CSS_SELECTOR, f"a[href*='/players/{player_id}']")
                 # Find the parent row/container
                 row = player_row

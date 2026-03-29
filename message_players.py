@@ -89,58 +89,70 @@ def message_players(driver, tournament_url, player_ids, message):
     not_found = []
     errors = []
 
-    for player_id in player_ids:
+    for player_ref in player_ids:
         try:
-            log.info("Messaging player: %s", player_id)
+            # player_ref is either a DartsAtlas ID or "name:Player Name"
+            is_name_match = player_ref.startswith("name:")
+            player_name = player_ref[5:] if is_name_match else None
+            player_id = player_ref if not is_name_match else None
+
+            log.info("Messaging player: %s", player_ref)
             driver.get(msg_url)
             time.sleep(2)
 
-            # Wait for the page to load
             wait = WebDriverWait(driver, 10)
 
             # Find the player dropdown/select
-            # Look for a select element that contains player options
             select_el = None
             try:
                 select_el = wait.until(EC.presence_of_element_located(
                     (By.CSS_SELECTOR, "select[name*='player'], select[name*='user'], select[name*='recipient'], select")))
             except Exception:
-                # Try finding any select on the page
                 selects = driver.find_elements(By.TAG_NAME, "select")
                 for s in selects:
                     options = s.find_elements(By.TAG_NAME, "option")
-                    if len(options) > 2:  # More than just a blank + 1 option
+                    if len(options) > 2:
                         select_el = s
                         break
 
             if not select_el:
                 log.error("Could not find player select dropdown")
-                errors.append({"id": player_id, "error": "No select dropdown found"})
+                errors.append({"id": player_ref, "error": "No select dropdown found"})
                 continue
 
-            # Select the player by value (player_id) or by scanning options
             select = Select(select_el)
             player_selected = False
 
-            # Try selecting by value first
-            try:
-                select.select_by_value(player_id)
-                player_selected = True
-            except Exception:
-                pass
+            if player_id:
+                # Try selecting by DartsAtlas ID in option value
+                try:
+                    select.select_by_value(player_id)
+                    player_selected = True
+                except Exception:
+                    pass
 
-            # Try finding option that contains the player ID in its value or text
-            if not player_selected:
+                if not player_selected:
+                    for option in select.options:
+                        val = option.get_attribute("value") or ""
+                        if player_id in val:
+                            select.select_by_value(val)
+                            player_selected = True
+                            break
+
+            if not player_selected and player_name:
+                # Match by name in dropdown option text
+                name_lower = player_name.lower().strip()
                 for option in select.options:
-                    val = option.get_attribute("value") or ""
-                    if player_id in val:
-                        select.select_by_value(val)
+                    option_text = option.text.strip().lower()
+                    if name_lower == option_text or name_lower in option_text:
+                        option.click()
                         player_selected = True
+                        log.info("  Matched by name: %s", option.text.strip())
                         break
 
             if not player_selected:
-                not_found.append(player_id)
-                log.warning("Player %s not found in dropdown", player_id)
+                not_found.append(player_ref)
+                log.warning("Player %s not found in dropdown", player_ref)
                 continue
 
             time.sleep(1)
@@ -152,7 +164,7 @@ def message_players(driver, tournament_url, player_ids, message):
                     "textarea[name*='message'], textarea[name*='body'], textarea[name*='content'], textarea")
             except Exception:
                 log.error("Could not find message textarea")
-                errors.append({"id": player_id, "error": "No textarea found"})
+                errors.append({"id": player_ref, "error": "No textarea found"})
                 continue
 
             # Clear and type the message (280 char limit)
@@ -183,15 +195,15 @@ def message_players(driver, tournament_url, player_ids, message):
             if submit:
                 submit.click()
                 time.sleep(2)
-                sent.append(player_id)
-                log.info("  SENT to %s", player_id)
+                sent.append(player_ref)
+                log.info("  SENT to %s", player_ref)
             else:
-                errors.append({"id": player_id, "error": "No submit button found"})
-                log.error("  No submit button for %s", player_id)
+                errors.append({"id": player_ref, "error": "No submit button found"})
+                log.error("  No submit button for %s", player_ref)
 
         except Exception as e:
-            errors.append({"id": player_id, "error": str(e)})
-            log.error("  ERROR messaging %s: %s", player_id, e)
+            errors.append({"id": player_ref, "error": str(e)})
+            log.error("  ERROR messaging %s: %s", player_ref, e)
 
     return {
         "sent": sent,
